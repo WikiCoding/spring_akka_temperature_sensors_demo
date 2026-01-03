@@ -11,9 +11,11 @@ public class AkkaConfigs {
     private int stashCapacity;
     @Value("${number.workers:1}")
     private int numberOfWorkers;
+    @Value("${manager.pool.size:1}")
+    private int poolSize;
 
     @Bean
     public ActorSystem<SensorManager.Command> actorSystem() {
-        return ActorSystem.create(SensorManager.create(stashCapacity, numberOfWorkers), SensorManager.class.getSimpleName());
+        return ActorSystem.create(SensorSystem.create(poolSize, stashCapacity, numberOfWorkers), SensorSystem.class.getSimpleName());
     }
 }
