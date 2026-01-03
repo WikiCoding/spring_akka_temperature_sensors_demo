@@ -7,3 +7,55 @@ services:
       POSTGRES_DB: temperatures-db
       POSTGRES_USERNAME: postgres
       POSTGRES_PASSWORD: postgres
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://kafka:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      CLUSTER_ID: test-cluster-id-12345
+    ports:
+      - "9092:9092"
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    ports:
+      - "8080:8080"
+
+  kafka-init:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - kafka
+    entrypoint: [ "/bin/sh", "-c" ]
+    command: |
+      "
+      # Wait for Kafka to be ready
+      echo 'Waiting for Kafka to be ready...'
+      /usr/bin/kafka-broker-api-versions --bootstrap-server kafka:29092 --version
+      while [ $$? -ne 0 ]; do
+        sleep 5
+        /usr/bin/kafka-broker-api-versions --bootstrap-server kafka:29092 --version
+      done
+      echo 'Kafka is up!'
+
+      # Create the topic
+      echo 'Creating Kafka topic: raw-sensor-data'
+      /usr/bin/kafka-topics --create --topic raw-sensor-data --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1 --if-not-exists
+      
+      echo 'Creating Kafka topic: reporting-data'
+      /usr/bin/kafka-topics --create --topic reporting-data --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1 --if-not-exists
+      echo 'Topic creation command executed.'
+      "
