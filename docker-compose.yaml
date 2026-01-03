@@ -1,0 +1,9 @@
+services:
+  postgres:
+    image: postgres
+    ports:
+      - "5555:5432"
+    environment:
+      POSTGRES_DB: temperatures-db
+      POSTGRES_USERNAME: postgres
+      POSTGRES_PASSWORD: postgres
