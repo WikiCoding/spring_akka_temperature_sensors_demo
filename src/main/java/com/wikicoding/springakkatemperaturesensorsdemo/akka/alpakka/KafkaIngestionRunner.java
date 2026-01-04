@@ -1,29 +1,26 @@
 package com.wikicoding.springakkatemperaturesensorsdemo.akka.alpakka;
 
-import akka.actor.typed.ActorRef;
 import akka.actor.typed.ActorSystem;
-import akka.actor.typed.javadsl.AskPattern;
-import akka.kafka.CommitterSettings;
-import akka.kafka.ConsumerSettings;
-import akka.kafka.Subscriptions;
+import akka.kafka.*;
 import akka.kafka.javadsl.Committer;
 import akka.kafka.javadsl.Consumer;
+import akka.kafka.javadsl.Producer;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wikicoding.springakkatemperaturesensorsdemo.akka.ReadingReport;
 import com.wikicoding.springakkatemperaturesensorsdemo.akka.SensorManager;
-import lombok.NonNull;
+import com.wikicoding.springakkatemperaturesensorsdemo.services.TemperaturesService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
 import java.util.UUID;
 
 @Component
@@ -46,28 +43,32 @@ public class KafkaIngestionRunner {
     @Value("${ask.timeout.seconds:1}")
     private int askTimeout;
     private final ObjectMapper objectMapper;
-    private final KafkaTemplate<@NonNull String, @NonNull String> kafkaTemplate;
+    private final TemperaturesService temperaturesService;
 
     @EventListener(ApplicationReadyEvent.class)
     public void startIngestion() {
         // Consumer to kick off the actors
         ConsumerSettings<String, String> consumerSettings = createConsumerSettings();
+        ProducerSettings<String, String> producerSettings = createProducerSettings();
 
         Consumer.committableSource(consumerSettings, Subscriptions.topics(consumerTopic))
                 .mapAsync(consumerParallelism, msg -> {
                     log.debug("Received Kafka message with key: {} and value: {}, triggering actor aggregation", msg.record().key(), msg.record().value());
 
-                    return AskPattern.ask(
-                            actorSystem,
-                            (ActorRef<ReadingReport> me) -> new SensorManager.GetReadingsCommand(me, askTimeout),
-                            Duration.ofSeconds(askTimeout + 1), // Slightly longer than actor timeout
-                            actorSystem.scheduler()
-                    ).thenApply(report -> {
+                    return temperaturesService.getTemperatureReport()
+                            .thenApply(report -> {
                         log.info("Kafka batch processed: Avg: {}, Min: {}, Max: {}", report.getAverage(), report.getMin(), report.getMax());
-                        produceMessageWithKafkaTemplate(report);
-                        return msg.committableOffset(); // Return offset to be committed
+                        String serialized = serializeReport(report);
+                        String key = UUID.randomUUID().toString();
+                        log.info("Producing Message with Alpakka with Key: {}, Value: {} to Topic: {}", key, serialized, producerTopic);
+                        return ProducerMessage.single(
+                                new ProducerRecord<>(producerTopic, key, serialized),
+                                msg.committableOffset()
+                        ); // Return offset to be committed too
                     });
                 })
+                .via(Producer.flexiFlow(producerSettings))
+                .map(result -> result.passThrough())
                 .runWith(Committer.sink(CommitterSettings.create(actorSystem)), actorSystem);
     }
 
@@ -78,18 +79,18 @@ public class KafkaIngestionRunner {
                 .withProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset);
     }
 
-    private void produceMessageWithKafkaTemplate(ReadingReport report) {
-        String serialized = "";
+    private ProducerSettings<String, String> createProducerSettings() {
+        return ProducerSettings.create(actorSystem, new StringSerializer(), new StringSerializer())
+                .withBootstrapServers(bootstrapServers);
+    }
 
+
+    private String serializeReport(ReadingReport report) {
         try {
-            serialized = objectMapper.writeValueAsString(report);
+            return objectMapper.writeValueAsString(report);
         } catch (JsonProcessingException e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException("Failed to serialize report", e);
         }
-
-        String key = UUID.randomUUID().toString();
-        kafkaTemplate.send(producerTopic, key, serialized);
-        log.info("Report sent to topic: {} with key: {} and value: {}", producerTopic, key, serialized);
     }
 }
 
