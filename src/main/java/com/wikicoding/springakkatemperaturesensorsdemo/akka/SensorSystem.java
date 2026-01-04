@@ -4,6 +4,7 @@ import akka.actor.typed.ActorRef;
 import akka.actor.typed.Behavior;
 import akka.actor.typed.SupervisorStrategy;
 import akka.actor.typed.javadsl.*;
+import com.wikicoding.springakkatemperaturesensorsdemo.persistence.TemperatureRepository;
 
 public class SensorSystem extends AbstractBehavior<SensorManager.Command> {
     private PoolRouter<SensorManager.Command> managerPoolRouter;
@@ -11,19 +12,21 @@ public class SensorSystem extends AbstractBehavior<SensorManager.Command> {
     private final int poolSize;
     private final int stashCapacity;
     private final int numOfWorkers;
+    private final TemperatureRepository temperatureRepository;
 
-    public SensorSystem(ActorContext<SensorManager.Command> context, int poolSize, int stashCapacity, int numOfWorkers) {
+    public SensorSystem(ActorContext<SensorManager.Command> context, int poolSize, int stashCapacity, int numOfWorkers, TemperatureRepository temperatureRepository) {
         super(context);
         this.poolSize = poolSize;
         this.stashCapacity = stashCapacity;
         this.numOfWorkers = numOfWorkers;
+        this.temperatureRepository = temperatureRepository;
         managerPoolRouter = Routers.pool(poolSize,
-                Behaviors.supervise(SensorManager.create(stashCapacity, numOfWorkers)).onFailure(SupervisorStrategy.restart())); // round-robin routing
+                Behaviors.supervise(SensorManager.create(stashCapacity, numOfWorkers, temperatureRepository)).onFailure(SupervisorStrategy.restart())); // round-robin routing
         managers = getContext().spawn(managerPoolRouter, "SensorManagerPool");
     }
 
-    public static Behavior<SensorManager.Command> create(int poolSize, int stashCapacity, int numOfWorkers) {
-        return Behaviors.setup(context -> new SensorSystem(context, poolSize, stashCapacity, numOfWorkers));
+    public static Behavior<SensorManager.Command> create(int poolSize, int stashCapacity, int numOfWorkers, TemperatureRepository temperatureRepository) {
+        return Behaviors.setup(context -> new SensorSystem(context, poolSize, stashCapacity, numOfWorkers, temperatureRepository));
     }
 
     @Override

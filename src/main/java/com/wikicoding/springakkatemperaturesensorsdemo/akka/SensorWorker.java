@@ -3,28 +3,34 @@ package com.wikicoding.springakkatemperaturesensorsdemo.akka;
 import akka.actor.typed.ActorRef;
 import akka.actor.typed.Behavior;
 import akka.actor.typed.javadsl.*;
+import com.wikicoding.springakkatemperaturesensorsdemo.persistence.Temperature;
+import com.wikicoding.springakkatemperaturesensorsdemo.persistence.TemperatureRepository;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
 import java.io.Serial;
 import java.io.Serializable;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Random;
+import java.util.UUID;
 
 public class SensorWorker extends AbstractBehavior<SensorWorker.Command> {
     /** Class variables section **/
     private final TimerScheduler<Command> timers;
     private final Object TIMER_KEY = "request-delay";
+    private final TemperatureRepository temperatureRepository;
 
     /** Constructor and create section **/
-    private SensorWorker(ActorContext<Command> context, TimerScheduler<Command> timers) {
+    private SensorWorker(ActorContext<Command> context, TimerScheduler<Command> timers, TemperatureRepository temperatureRepository) {
         super(context);
         this.timers = timers;
+        this.temperatureRepository = temperatureRepository;
     }
 
-    public static Behavior<Command> create() {
+    public static Behavior<Command> create(TemperatureRepository temperatureRepository) {
         return Behaviors.withTimers(timer ->
-                Behaviors.setup(context -> new SensorWorker(context, timer))
+                Behaviors.setup(context -> new SensorWorker(context, timer, temperatureRepository))
         );
     }
 
@@ -56,6 +62,8 @@ public class SensorWorker extends AbstractBehavior<SensorWorker.Command> {
     private Behavior<Command> onTimeUp(WrappedTempReading wrapped) {
         Random random = new Random();
         double randomTemp = random.nextDouble(-10, 45);
+
+        temperatureRepository.save(new Temperature(UUID.randomUUID().toString(), randomTemp, LocalDateTime.now()));
 
         getContext().getLog().debug("Worker {} replying with temperature {}ºC.", getContext().getSelf().path(), randomTemp);
         wrapped.originalRequest.getReplyTo().tell(

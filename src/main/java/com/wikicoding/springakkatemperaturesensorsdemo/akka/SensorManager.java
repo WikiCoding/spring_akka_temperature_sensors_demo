@@ -5,6 +5,7 @@ import akka.actor.typed.Behavior;
 import akka.actor.typed.SupervisorStrategy;
 import akka.actor.typed.Terminated;
 import akka.actor.typed.javadsl.*;
+import com.wikicoding.springakkatemperaturesensorsdemo.persistence.TemperatureRepository;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
@@ -22,21 +23,23 @@ public class SensorManager extends AbstractBehavior<SensorManager.Command> {
     private ActorRef<ReadingReport> sender;
     private final TimerScheduler<Command> timers;
     private final Object TIMER_KEY = "request-timeout";
+    private final TemperatureRepository temperatureRepository;
 
     /** Constructor and create section **/
-    private SensorManager(ActorContext<Command> context, StashBuffer<Command> stash, int numberOfWorkers, TimerScheduler<Command> timers) {
+    private SensorManager(ActorContext<Command> context, StashBuffer<Command> stash, int numberOfWorkers, TimerScheduler<Command> timers, TemperatureRepository temperatureRepository) {
         super(context);
         this.stash = stash;
         this.numberOfWorkers = numberOfWorkers;
         this.timers = timers;
+        this.temperatureRepository = temperatureRepository;
     }
 
-    public static Behavior<Command> create(int stashCapacity, int numOfWorkers) {
+    public static Behavior<Command> create(int stashCapacity, int numOfWorkers, TemperatureRepository temperatureRepository) {
         return Behaviors.withStash(stashCapacity,
                 stash ->
                         Behaviors.withTimers(timer ->
                                 Behaviors.setup(context ->
-                                        new SensorManager(context, stash, numOfWorkers, timer)
+                                        new SensorManager(context, stash, numOfWorkers, timer, temperatureRepository)
                                 )
                 ));
     }
@@ -149,7 +152,7 @@ public class SensorManager extends AbstractBehavior<SensorManager.Command> {
     }
 
     private void createNextActorAndTellItToWork(int workerId) {
-        Behavior<SensorWorker.Command> workerBehaviour = Behaviors.supervise(SensorWorker.create()).onFailure(SupervisorStrategy.restart());
+        Behavior<SensorWorker.Command> workerBehaviour = Behaviors.supervise(SensorWorker.create(temperatureRepository)).onFailure(SupervisorStrategy.restart());
 
         ActorRef<SensorWorker.Command> worker = getContext().spawn(workerBehaviour, "SensorWorker-" + workerId);
         getContext().watch(worker);
